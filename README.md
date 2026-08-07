@@ -2,6 +2,8 @@
 
 CLI OBD-II scanner for ELM327 dongles (e.g. GODIAG GT327) plus enhanced **DoIP/UDS** manufacturer packs for ethernet-capable adapters.
 
+This is a basic CLI program to communicate with the cheap GODIAG GT327. Similar to the Ubuntu package obdscan that works with the elm327 but the gt327 also has DoIP ethernet fuction that this program also takes advantage of. Not much testing has been done yet. No gui is planned as I personally prefer cli.
+
 - Bluetooth ELM → SAE OBD-II (codes, live PIDs, readiness, freeze frame, …)
 - DoIP ethernet → OEM module scaffolds (Toyota, Ford, Chevy, BMW, …)
 
