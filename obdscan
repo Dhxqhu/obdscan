@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Resolve symlinks so ~/.local/bin/obdscan finds the real package dir.
+SOURCE="${BASH_SOURCE[0]:-$0}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd "$(dirname "$SOURCE")" && pwd)"
+
+if [[ -x /tools/venv/bin/python ]]; then
+  PY=/tools/venv/bin/python
+else
+  PY=python3
+fi
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PY" "$ROOT/obdscan.py" "$@"

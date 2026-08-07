@@ -1,0 +1,4 @@
+rich>=13.0
+pyserial>=3.5
+doipclient>=1.2
+udsoncan>=1.25
