@@ -7,34 +7,65 @@ CLI OBD-II scanner for ELM327 dongles (e.g. GODIAG GT327) plus enhanced **DoIP/U
 
 ## Install
 
+### 1. Clone
+
 ```bash
 git clone https://github.com/Dhxqhu/obdscan.git
 cd obdscan
+```
+
+### 2. System packages (Debian / Ubuntu)
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip bluez bluez-tools rfkill
+```
+
+Bluetooth binding also needs `rfcomm` (usually from `bluez`).
+
+### 3. Python deps
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Optional: put the wrapper on your PATH:
+### 4. Optional: put `obdscan` on your PATH
 
 ```bash
+mkdir -p ~/.local/bin
 ln -sf "$(pwd)/obdscan" ~/.local/bin/obdscan
+# ensure ~/.local/bin is on PATH, then:
+obdscan --help
 ```
 
-## Bluetooth (ELM327)
+Without the symlink, always run `./obdscan` from the repo (with the venv activated).
+
+### 5. Bluetooth MAC (GT327)
+
+Edit the default address in `connect-bt.sh`, or pass it:
 
 ```bash
-./connect-bt.sh                 # once per boot (edit MAC if needed)
+./connect-bt.sh AA:BB:CC:11:22:33
+```
+
+## Quick start — Bluetooth (ELM327)
+
+```bash
+source .venv/bin/activate
+./connect-bt.sh                 # once per boot
 ./obdscan                       # interactive menu
-# or
-OBD_PORT=/dev/rfcomm0 ./obdscan codes
 ```
 
-## Ethernet DoIP (GT327 ENET mode)
+Port override: `-p /dev/rfcomm0` or `OBD_PORT=/dev/rfcomm0`.
 
-Needs a DoIP-capable car + adapter DoIP/ENET switch on + ethernet link.
+## Quick start — Ethernet DoIP (GT327 ENET)
+
+Needs a DoIP-capable car, GT327 DoIP/ENET switch on, and ethernet linked to the laptop.
 
 ```bash
+source .venv/bin/activate
 ./obdscan                       # menu → 14 Enhanced DoIP
 # or
 ./obdscan doip menu
@@ -73,8 +104,6 @@ Needs a DoIP-capable car + adapter DoIP/ENET switch on + ethernet link.
 ./obdscan doip discover
 ./obdscan doip probe -m toyota --ip 169.254.1.20
 ```
-
-Port override: `-p /dev/rfcomm0` or `OBD_PORT=...`
 
 ## Notes
 
