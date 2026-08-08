@@ -91,12 +91,14 @@ source .venv/bin/activate
 | 13 | Raw AT/OBD |
 | 14 | Enhanced DoIP / manufacturer packs |
 | 15 | List manufacturer libraries |
+| 16 | Save codes + vehicle info → `~/Documents/Saved Codes/` |
 | q | Quit |
 
 ## Subcommands
 
 ```bash
 ./obdscan codes
+./obdscan save
 ./obdscan live --once RPM SPEED COOLANT
 ./obdscan info
 ./obdscan readiness
@@ -107,6 +109,7 @@ source .venv/bin/activate
 ./obdscan doip probe -m toyota --ip 169.254.1.20
 ```
 
+Saved reports land in `~/Documents/Saved Codes/` as timestamped `.txt` files (VIN included in the filename when available).
 ## Notes
 
 Manufacturer packs are **address/DID scaffolds** from public sources — not dealer databases (ODIS/ISTA/Xentry). Many logical addresses will time out; that is expected.

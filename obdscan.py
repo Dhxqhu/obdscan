@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 try:
@@ -42,6 +43,7 @@ else:
 CONSOLE = Console()
 HERE = Path(__file__).resolve().parent
 DEFAULT_PORT = os.environ.get("OBD_PORT", "/dev/rfcomm0")
+SAVED_CODES_DIR = Path.home() / "Documents" / "Saved Codes"
 
 # PID catalog: name -> (mode01 hex, unit label, formatter(data_bytes)->str)
 PID_CATALOG: dict[str, tuple[str, str, object]] = {
@@ -157,27 +159,26 @@ class App:
     # --- modules ------------------------------------------------------------
 
     def module_read_codes(self, force: bool = False) -> None:
-        if not self.require_session():
+        rows = self._fetch_dtc_rows(force=force)
+        if rows is None:
             return
-        info = self.session.info
-        if info and not info.ecu_alive and not force:
-            if sys.stdin.isatty():
-                if not Confirm.ask("No ECU detected. Query DTCs anyway?", default=False):
-                    return
-            else:
-                CONSOLE.print(
-                    "[yellow]No ECU detected.[/] Re-run with [bold]--force[/] to query anyway."
-                )
-                return
-        CONSOLE.print("[cyan]Reading DTCs[/] (stored / pending / permanent)…")
-        rows: list[tuple[str, str]] = []
-        for label, cmd in (("Stored", "03"), ("Pending", "07"), ("Permanent", "0A")):
-            resp = self.session.cmd(cmd, wait=2.0)
-            if any(x in resp.upper() for x in ("NO DATA", "UNABLE", "ERROR")):
-                continue
-            for code in parse_dtc_response(resp):
-                rows.append((label, code))
         self._render_codes(rows)
+        if sys.stdin.isatty() and Confirm.ask(
+            "Save codes + vehicle info to Documents/Saved Codes?", default=False
+        ):
+            path = self._save_codes_report(rows)
+            if path:
+                CONSOLE.print(f"[green]Saved[/] → {path}")
+
+    def module_save_codes(self, force: bool = False) -> None:
+        """Read DTCs and vehicle info, then write a text report under Documents/Saved Codes."""
+        rows = self._fetch_dtc_rows(force=force)
+        if rows is None:
+            return
+        self._render_codes(rows)
+        path = self._save_codes_report(rows)
+        if path:
+            CONSOLE.print(f"[green]Saved[/] → {path}")
 
     def module_clear_codes(self, yes: bool = False) -> None:
         if not self.require_session():
@@ -238,39 +239,12 @@ class App:
     def module_vehicle_info(self) -> None:
         if not self.require_session():
             return
+        info = self._collect_vehicle_info()
         table = Table(title="Vehicle / ECU info")
         table.add_column("Item", style="cyan")
         table.add_column("Value")
-
-        # Mode 09 VIN (slow)
-        vin = self._read_vin()
-        table.add_row("VIN", vin or "—")
-
-        # Mode 01 PID support / MIL
-        mil = self._read_mil()
-        table.add_row("MIL", mil or "—")
-
-        # A few identity-ish PIDs
-        for label, pid, unit, fmt in (
-            ("Battery (PID 42)", "42", "V", PID_CATALOG["CTRL_MOD_V"][2]),
-            ("Fuel level", "2F", "%", PID_CATALOG["FUEL_LEVEL"][2]),
-            ("Runtime", "1F", "s", PID_CATALOG["RUNTIME"][2]),
-        ):
-            val = self._query_pid(pid, fmt)
-            table.add_row(label, f"{val} {unit}" if val != "—" else "—")
-
-        # ELM extras
-        for atcmd, label in (("ATI", "Adapter"), ("ATRV", "ATRV"), ("ATDP", "Protocol")):
-            resp = self.session.cmd(atcmd, wait=0.5)
-            line = next(
-                (
-                    ln.strip()
-                    for ln in resp.splitlines()
-                    if ln.strip() and ln.strip().upper() not in {atcmd, "OK", ">"}
-                ),
-                "—",
-            )
-            table.add_row(label, line)
+        for label, value in info.items():
+            table.add_row(label, value)
         CONSOLE.print(table)
 
     def module_readiness(self) -> None:
@@ -430,6 +404,101 @@ class App:
 
     # --- helpers ------------------------------------------------------------
 
+    def _fetch_dtc_rows(self, force: bool = False) -> list[tuple[str, str]] | None:
+        """Read stored/pending/permanent DTCs. Returns None if aborted."""
+        if not self.require_session():
+            return None
+        info = self.session.info
+        if info and not info.ecu_alive and not force:
+            if sys.stdin.isatty():
+                if not Confirm.ask("No ECU detected. Query DTCs anyway?", default=False):
+                    return None
+            else:
+                CONSOLE.print(
+                    "[yellow]No ECU detected.[/] Re-run with [bold]--force[/] to query anyway."
+                )
+                return None
+        CONSOLE.print("[cyan]Reading DTCs[/] (stored / pending / permanent)…")
+        rows: list[tuple[str, str]] = []
+        for label, cmd in (("Stored", "03"), ("Pending", "07"), ("Permanent", "0A")):
+            resp = self.session.cmd(cmd, wait=2.0)
+            if any(x in resp.upper() for x in ("NO DATA", "UNABLE", "ERROR")):
+                continue
+            for code in parse_dtc_response(resp):
+                rows.append((label, code))
+        return rows
+
+    def _collect_vehicle_info(self) -> dict[str, str]:
+        """Gather VIN, MIL, a few PIDs, and adapter identity for display / save."""
+        out: dict[str, str] = {}
+        vin = self._read_vin()
+        out["VIN"] = vin or "—"
+        mil = self._read_mil()
+        out["MIL"] = mil or "—"
+        for label, pid, unit, fmt in (
+            ("Battery (PID 42)", "42", "V", PID_CATALOG["CTRL_MOD_V"][2]),
+            ("Fuel level", "2F", "%", PID_CATALOG["FUEL_LEVEL"][2]),
+            ("Runtime", "1F", "s", PID_CATALOG["RUNTIME"][2]),
+        ):
+            val = self._query_pid(pid, fmt)
+            out[label] = f"{val} {unit}" if val != "—" else "—"
+        for atcmd, label in (("ATI", "Adapter"), ("ATRV", "Voltage"), ("ATDP", "Protocol")):
+            resp = self.session.cmd(atcmd, wait=0.5)
+            line = next(
+                (
+                    ln.strip()
+                    for ln in resp.splitlines()
+                    if ln.strip() and ln.strip().upper() not in {atcmd, "OK", ">"}
+                ),
+                "—",
+            )
+            out[label] = line
+        sess = self.session.info
+        if sess:
+            out["ELM"] = sess.version or "—"
+            if sess.voltage and out.get("Voltage") in (None, "—"):
+                out["Voltage"] = sess.voltage
+            if sess.protocol and out.get("Protocol") in (None, "—"):
+                out["Protocol"] = sess.protocol
+        out["Port"] = self.port
+        return out
+
+    def _save_codes_report(self, rows: list[tuple[str, str]]) -> Path | None:
+        """Write DTC + vehicle info text file under Documents/Saved Codes."""
+        CONSOLE.print("[cyan]Collecting vehicle info…[/]")
+        vehicle = self._collect_vehicle_info()
+        SAVED_CODES_DIR.mkdir(parents=True, exist_ok=True)
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        vin = vehicle.get("VIN", "—")
+        vin_part = ""
+        if vin and vin != "—" and re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", vin.upper()):
+            vin_part = f"_{vin.upper()}"
+        path = SAVED_CODES_DIR / f"dtc_{stamp}{vin_part}.txt"
+
+        lines: list[str] = [
+            "obdscan — saved DTC report",
+            f"Saved: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "=== Vehicle ===",
+        ]
+        for label, value in vehicle.items():
+            lines.append(f"{label}: {value}")
+        lines.extend(["", "=== Diagnostic Trouble Codes ==="])
+        if not rows:
+            lines.append("(none reported)")
+        else:
+            lines.append(f"{'Type':<12} {'Code':<8} Description")
+            lines.append("-" * 72)
+            for bucket, code in rows:
+                desc = lookup_code(self.db, code)
+                lines.append(f"{bucket:<12} {code:<8} {desc}")
+            lines.append("")
+            lines.append(f"Total: {len(rows)} code(s)")
+
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path
+
     def _render_codes(self, rows: list[tuple[str, str]]) -> None:
         if not rows:
             CONSOLE.print(
@@ -513,6 +582,7 @@ class App:
             "13": ("Raw AT/OBD command", lambda: self.module_raw()),
             "14": ("Enhanced DoIP / manufacturer modules", lambda: self.module_enhanced()),
             "15": ("List manufacturer libraries", lambda: self.module_list_manufacturers()),
+            "16": ("Save codes + vehicle info", lambda: self.module_save_codes()),
             "q": ("Quit", None),
         }
 
@@ -572,6 +642,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("status", help="Show adapter / ECU status")
     s = sub.add_parser("codes", help="Read DTCs + descriptions")
+    s.add_argument("--force", action="store_true")
+    s = sub.add_parser("save", help="Save DTCs + vehicle info to Documents/Saved Codes")
     s.add_argument("--force", action="store_true")
     s = sub.add_parser("clear", help="Clear DTCs")
     s.add_argument("--yes", action="store_true")
@@ -636,6 +708,8 @@ def main(argv: list[str] | None = None) -> None:
             app.show_status()
         elif cmd == "codes":
             app.module_read_codes(force=args.force)
+        elif cmd == "save":
+            app.module_save_codes(force=args.force)
         elif cmd == "clear":
             app.module_clear_codes(yes=args.yes)
         elif cmd == "live":
