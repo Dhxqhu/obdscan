@@ -595,7 +595,6 @@ class App:
             choice = Prompt.ask("Select", default="4").strip().lower()
             if choice in {"q", "quit", "exit", "0"}:
                 self.disconnect()
-                CONSOLE.print("[dim]bye[/]")
                 return
             if choice not in actions:
                 CONSOLE.print("[yellow]Unknown option[/]")
