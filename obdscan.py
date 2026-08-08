@@ -71,6 +71,32 @@ PID_CATALOG: dict[str, tuple[str, str, object]] = {
 
 DEFAULT_LIVE = ["RPM", "SPEED", "COOLANT", "LOAD", "THROTTLE"]
 
+# Common raw commands shown by `help` in the raw AT/OBD prompt
+RAW_AT_COMMANDS: list[tuple[str, str]] = [
+    ("ATZ", "Reset adapter"),
+    ("ATI", "Adapter identification"),
+    ("ATRV", "Adapter-measured battery voltage"),
+    ("ATDP", "Describe current protocol"),
+    ("ATDPN", "Protocol number"),
+    ("ATSP0", "Auto protocol select"),
+    ("ATE0", "Echo off"),
+    ("ATE1", "Echo on"),
+    ("ATH0", "Headers off"),
+    ("ATH1", "Headers on"),
+    ("ATL0", "Linefeeds off"),
+    ("ATWS", "Warm start"),
+]
+
+RAW_OBD_COMMANDS: list[tuple[str, str]] = [
+    ("03", "Read stored DTCs"),
+    ("04", "Clear DTCs / MIL"),
+    ("07", "Read pending DTCs"),
+    ("0A", "Read permanent DTCs"),
+    ("0100", "Supported Mode 01 PIDs 01–20"),
+    ("0101", "Monitor status / MIL"),
+    ("0902", "VIN"),
+]
+
 
 class App:
     """Interactive OBD CLI application."""
@@ -340,11 +366,42 @@ class App:
             table.add_row(code.strip().upper(), lookup_code(self.db, code))
         CONSOLE.print(table)
 
+    def _show_raw_help(self) -> None:
+        at = Table(title="AT commands (adapter)")
+        at.add_column("Command", style="cyan")
+        at.add_column("Description")
+        for cmd, desc in RAW_AT_COMMANDS:
+            at.add_row(cmd, desc)
+
+        obd = Table(title="OBD commands (vehicle)")
+        obd.add_column("Command", style="cyan")
+        obd.add_column("Description")
+        for cmd, desc in RAW_OBD_COMMANDS:
+            obd.add_row(cmd, desc)
+        for name, (pid, unit, _) in sorted(PID_CATALOG.items()):
+            obd.add_row(f"01{pid}", f"{name} ({unit})")
+
+        CONSOLE.print(at)
+        CONSOLE.print(obd)
+        CONSOLE.print("[dim]Type any of the above, or another AT/OBD hex string, then Enter.[/]")
+
     def module_raw(self, command: str | None = None) -> None:
+        if command and command.strip().lower() == "help":
+            self._show_raw_help()
+            return
         if not self.require_session():
             return
-        if not command:
-            command = Prompt.ask("AT / OBD command", default="010C")
+        while True:
+            if not command:
+                command = Prompt.ask(
+                    "AT / OBD command (type help for command list)",
+                    default="010C",
+                )
+            if command.strip().lower() == "help":
+                self._show_raw_help()
+                command = None
+                continue
+            break
         resp = self.session.cmd(command, wait=1.5)
         CONSOLE.print(Panel(resp.strip() or "(empty)", title=f"Raw · {command}", border_style="magenta"))
 
